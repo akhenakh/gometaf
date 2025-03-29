@@ -28,7 +28,7 @@ explain: libmetaf.so
 	$(GO) build -o explain ./cmd/explain/main.go
 
 # Build the metaf command
-explain: libmetaf.so
+metaf: libmetaf.so
 	$(GO) build -o metaf ./cmd/metaf/main.go
 
 # Clean target
