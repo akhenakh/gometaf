@@ -359,7 +359,7 @@ private:
                 }
 
                 if (const auto h = group.height().distance(); h.has_value()) {
-                    result << " at " << *h * 100 << " feet";
+                    result << " at " << *h << " feet";
                 }
 
                 if (group.convectiveType() == metaf::CloudGroup::ConvectiveType::CUMULONIMBUS) {
