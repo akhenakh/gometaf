@@ -19,7 +19,7 @@ The project includes a command-line tool `explain` that demonstrates how to use 
 
 ### Prerequisites
 
-- Go 
+- Go
 - SWIG 4.0 or higher
 - C++ compiler (gcc, clang)
 - The original metaf C++ library (included for convenience)
@@ -53,6 +53,52 @@ The `explain` tool demonstrates how to use the library:
 # Explain a METAR report
 explain -report "METAR KSFO 081656Z 28011KT 10SM FEW013 BKN042 16/09 A3007 RMK AO2 SLP182 T01610094"
 ````
+## As As Code
+
+```Go
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+
+	metaf "github.com/akhenakh/gometaf"
+)
+
+func main() {
+	reportStr := flag.String("report", "METAR KLAX 091953Z 25005KT 10SM FEW040 SCT060 BKN120 19/13 A2994 RMK AO2 SLP138 T01890133=", "METAR/TAF report string")
+	pretty := flag.Bool("pretty", false, "Pretty-print JSON output")
+	flag.Parse()
+
+	if *reportStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: -report flag cannot be empty")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	explanation, err := metaf.ExplainReport(*reportStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error explaining report: %v\n", err)
+		os.Exit(1)
+	}
+
+	var jsonData []byte
+	if *pretty {
+		jsonData, err = json.MarshalIndent(explanation, "", "  ")
+	} else {
+		jsonData, err = json.Marshal(explanation)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error marshaling JSON: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(string(jsonData))
+}
+```
 
 ## License
 
@@ -62,4 +108,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - This project is based on the [metaf](https://github.com/nnaumenko/metaf) C++ library by Nikolai Naumenko
 - The original metaf library is included for convenience
-

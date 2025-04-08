@@ -1,156 +1,117 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
-	"html"
 	"os"
 	"strings"
 
-	metaf "github.com/akhenakh/gometaf" // Import the SWIG generated wrapper
+	metaf "github.com/akhenakh/gometaf"
 )
 
-// ExplainResult represents a result from explaining a METAR/TAF group
-type ExplainResult struct {
-	RawGroup    string
-	Explanation string
-}
-
-// MetafExplainer explains METAR/TAF reports
-type MetafExplainer struct{}
-
-// Explain parses and explains a METAR/TAF report
-func (m *MetafExplainer) Explain(input string) ([]ExplainResult, string, string) {
-	// Parse the METAR/TAF report
-	parseResult := metaf.ParseMetaf(input)
-
-	// Get the original groups from the input
-	// Split by spaces but keep groups that might contain spaces inside quotes together
-	originalGroups := splitMaintainingQuotedGroups(input)
-
-	// Prepare our results
-	var results []ExplainResult
-
-	// Get report type text
-	reportType := parseResult.GetReportType()
-
-	// Get error text if any
-	errorText := ""
-	if parseResult.GetError() != "" {
-		errorText = fmt.Sprintf("Parsing error: %s", parseResult.GetError())
-	}
-
-	// Get explanations
-	explanations := parseResult.GetRawGroups()
-
-	// Process each group
-	for i := 0; i < int(explanations.Size()); i++ {
-		explanation := explanations.Get(i)
-
-		// Find the raw group from original input
-		rawGroup := ""
-		if i < len(originalGroups) {
-			rawGroup = originalGroups[i]
-		}
-
-		// Replace newlines with HTML breaks for HTML output
-		explanation = strings.ReplaceAll(explanation, "\n", "<br>")
-
-		results = append(results, ExplainResult{
-			RawGroup:    rawGroup,
-			Explanation: explanation,
-		})
-	}
-
-	return results, reportType, errorText
-}
-
-// Split a string by spaces while keeping quoted sections together
-func splitMaintainingQuotedGroups(s string) []string {
-	var result []string
-	var current string
-	inQuotes := false
-
-	// Replace the report end character with space to avoid it being part of a group
-	s = strings.Replace(s, "=", " ", -1)
-
-	for _, char := range s {
-		if char == '"' {
-			inQuotes = !inQuotes
-			continue
-		}
-
-		if char == ' ' && !inQuotes {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else {
-			current += string(char)
-		}
-	}
-
-	if current != "" {
-		result = append(result, current)
-	}
-
-	return result
-}
-
 func main() {
-	// Parse command line flags
-	report := flag.String("report", "", "METAR/TAF report to parse")
-	outputHTML := flag.Bool("html", false, "Output as HTML table")
+	reportInput := flag.String("report", "", "METAR/TAF report to parse")
+	outputFormat := flag.String("format", "text", "Output format: text or json")
+	prettyJson := flag.Bool("pretty", false, "Pretty-print JSON output (only applicable with json format)")
 	flag.Parse()
 
-	// Check if a report was provided
-	if *report == "" {
-		fmt.Println("Please provide a METAR/TAF report using the -report flag")
+	if *reportInput == "" {
+		fmt.Fprintln(os.Stderr, "Error: Please provide a METAR/TAF report using the -report flag.")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	// Create the explainer
-	explainer := &MetafExplainer{}
+	// Validate output format
+	format := strings.ToLower(*outputFormat)
+	if format != "text" && format != "json" {
+		fmt.Fprintf(os.Stderr, "Error: Invalid format '%s'. Must be 'text' or 'json'.\n", *outputFormat)
+		os.Exit(1)
+	}
 
-	// Explain the report
-	results, reportType, errorText := explainer.Explain(*report)
+	explanation, err := metaf.ExplainReport(*reportInput)
+	if err != nil {
+		// Handle errors returned by the library (e.g., empty input)
+		fmt.Fprintf(os.Stderr, "Error explaining report: %v\n", err)
+		os.Exit(1)
+	}
 
-	// Output the results
-	if *outputHTML {
-		fmt.Println("<table border='1'>")
-		fmt.Println("<thead><tr><th>Group</th><th>Explanation</th></tr></thead>")
-		fmt.Println("<tbody>")
-
-		fmt.Printf("<tr><td>&nbsp;</td><td>Detected report type: %s</td></tr>\n",
-			escapeHTML(reportType))
-
-		if errorText != "" {
-			fmt.Printf("<tr><td>&nbsp;</td><td>%s</td></tr>\n", escapeHTML(errorText))
+	if format == "json" {
+		// Output as JSON
+		var jsonData []byte
+		if *prettyJson {
+			jsonData, err = json.MarshalIndent(explanation, "", "  ")
+		} else {
+			jsonData, err = json.Marshal(explanation)
 		}
 
-		for _, result := range results {
-			fmt.Printf("<tr><td>%s</td><td>%s</td></tr>\n",
-				escapeHTML(result.RawGroup), result.Explanation)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling JSON: %v\n", err)
+			os.Exit(1)
 		}
 
-		fmt.Println("</tbody></table>")
+		fmt.Println(string(jsonData))
 	} else {
-		fmt.Printf("Report type: %s\n\n", reportType)
-
-		if errorText != "" {
-			fmt.Printf("%s\n\n", errorText)
+		// Output as plain text (default)
+		fmt.Printf("Report Type: %s\n", explanation.ReportType)
+		if explanation.Error != "" {
+			fmt.Printf("Parsing Issue: %s\n", explanation.Error)
 		}
 
-		for _, result := range results {
-			// Ensure a minimum width for alignment
-			fmt.Printf("%-20s %s\n", result.RawGroup,
-				strings.ReplaceAll(result.Explanation, "<br>", "\n                     "))
+		// Print other metadata flags if they are set or relevant
+		if explanation.Location != "" {
+			fmt.Printf("Location:    %s\n", explanation.Location)
+		}
+		if explanation.Timestamp != "" {
+			fmt.Printf("Timestamp:   %s\n", explanation.Timestamp)
+		}
+		if explanation.IsSpeci {
+			fmt.Println("Is SPECI:    true")
+		}
+		if explanation.IsAutomated {
+			fmt.Println("Is Automated:true")
+		}
+		if explanation.IsNil {
+			fmt.Println("Is NIL:      true")
+		}
+		if explanation.IsCancelled {
+			fmt.Println("Is Cancelled:true")
+		}
+		if explanation.IsAmended {
+			fmt.Println("Is Amended:  true")
+		}
+		if explanation.IsCorrectional {
+			fmt.Println("Is Correctnl:true")
+		}
+
+		fmt.Println("\n--- Groups ---")
+
+		// Find the maximum length of raw groups for alignment
+		maxGroupLen := 0
+		for _, group := range explanation.Groups {
+			if len(group.RawGroup) > maxGroupLen {
+				maxGroupLen = len(group.RawGroup)
+			}
+		}
+		// Ensure minimum width, but allow for longer groups
+		if maxGroupLen < 15 {
+			maxGroupLen = 15
+		}
+		alignFormat := fmt.Sprintf("%%-%ds  ", maxGroupLen) // e.g., "%-15s  "
+
+		for _, group := range explanation.Groups {
+			// Handle multi-line explanations for aligned plain text output
+			lines := strings.Split(group.Explanation, "\n")
+			fmt.Printf(alignFormat, group.RawGroup) // Print the raw group aligned
+			fmt.Printf("%s\n", lines[0])            // Print the first line of explanation
+
+			// Print subsequent lines indented
+			if len(lines) > 1 {
+				indent := strings.Repeat(" ", maxGroupLen+2) // Spaces for alignment + 2 spaces separator
+				for _, line := range lines[1:] {
+					fmt.Printf("%s%s\n", indent, line)
+				}
+			}
 		}
 	}
-}
-
-// HTML escape function
-func escapeHTML(s string) string {
-	return html.EscapeString(s)
 }
